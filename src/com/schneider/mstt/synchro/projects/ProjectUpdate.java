@@ -1,7 +1,8 @@
 package com.schneider.mstt.synchro.projects;
 
-import com.schneider.mstt.synchro.projects.service.MSTTService;
 import com.schneider.mstt.synchro.projects.dao.SpotProjectFilterDAO;
+import com.schneider.mstt.synchro.projects.exceptions.LoginException;
+import com.schneider.mstt.synchro.projects.service.MSTTService;
 import com.sciforma.psnext.api.AccessException;
 import com.sciforma.psnext.api.PSException;
 import com.sciforma.psnext.api.Project;
@@ -21,7 +22,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.PropertySource;
-import schneider.mstt.api.CommObjectDTO;
 import schneider.mstt.api.PSNextManager;
 import schneider.mstt.api.ProjectDTO;
 
@@ -41,13 +41,15 @@ public class ProjectUpdate {
 
     @Autowired
     private MSTTService msttService;
+    @Autowired
+    private Common common;
+    @Autowired
+    private SpotProjectFilterDAO spotProjectFilterDAO;
 
     /**
      * For save application messages.
      */
     private final transient List<String> messages;
-
-    private transient SpotProjectFilterDAO spotProjectFilterDAO;
 
     private transient PSNextManager pSNextManagerSpot;
 
@@ -58,32 +60,14 @@ public class ProjectUpdate {
         messages = new ArrayList<>();
     }
 
-    /**
-     *
-     * Method executed before process method.
-     */
-    protected void init() {
-
-        // Init projectFilterDAO instance
-        try {
-            spotProjectFilterDAO = new SpotProjectFilterDAO();
-        } catch (IOException | ClassNotFoundException e) {
-            LOG.fatal(e);
-            close(Common.ERROR_EXIST_CODE);
-        }
-
-    }
-
     // -------------------------------------------------------------------------------------------------------------
     public void process() {
         int processStat = 0;
-        //
-        init();
 
         // Getting last process date
         String date = null;
         try {
-            date = Common.getInstance().getLastProcessDate();
+            date = common.getLastProcessDate();
             LOG.debug("Last date=" + date);
         } catch (IOException | ParseException e) {
             LOG.fatal("Error : cannot get the last update process date : ", e);
@@ -117,7 +101,7 @@ public class ProjectUpdate {
             pSNextManagerSpot = new PSNextManager(session);
 
             List<ProjectDTO> projectsToUpdate = new ArrayList<>();
-            
+
             for (String projectId : modifiedProjectIds) {
                 final Project pSNextProj = pSNextManagerSpot.getProjectById(projectId);
 
@@ -130,7 +114,7 @@ public class ProjectUpdate {
                     processStat = Common.ERROR_EXIST_CODE;
                     continue;
                 }
-                
+
                 projectsToUpdate.add(projectDTO);
 
 //                CommObjectDTO result;
@@ -157,15 +141,20 @@ public class ProjectUpdate {
 //                    });
 //                }
             }
-            
-            msttService.updateProjects(projectsToUpdate);
+
+            try {
+                msttService.updateProjects(projectsToUpdate);
+            } catch (LoginException e) {
+                messages.add(e.getMessage());
+                close(Common.ERROR_EXIST_CODE);
+            }
 
             System.out.println("Publishing projects: " + new Date());
             msttService.publishProjects();
             System.out.println("Project published: " + new Date());
 
             try {
-                Common.getInstance().updateLastProcessDate();
+                common.updateLastProcessDate();
             } catch (IOException e) {
                 LOG.error(e);
                 close(Common.ERROR_EXIST_CODE);
